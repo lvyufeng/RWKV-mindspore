@@ -57,7 +57,7 @@ class RWKVLayer(nn.Cell):
             frac_d = next_frac_d
 
         # output = matmul(output, self.w_o, transpose_b=True)
-        return output, y.unsqueeze(0)
+        return output, output[-1].unsqueeze(0)
 
 class BiRWKV(nn.Cell):
     def __init__(self, input_size, hidden_size, batch_first=False, bidirectional=False):

@@ -150,6 +150,8 @@ import mindspore.ops as ops
 from mindspore.common.initializer import Uniform, HeUniform
 from src.layer.rwkv import BiRWKV
 
+ms.set_context(enable_graph_kernel=True)
+
 class RNN(nn.Cell):
     def __init__(self, embeddings, hidden_dim, output_dim, n_layers,
                  bidirectional, dropout, pad_idx):
@@ -194,6 +196,7 @@ def forward_fn(data, label):
 
 grad_fn = ms.value_and_grad(forward_fn, None, optimizer.parameters)
 
+@ms.jit
 def train_step(data, label):
     loss, grads = grad_fn(data, label)
     optimizer(grads)
