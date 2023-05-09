@@ -55,8 +55,6 @@ class TestRWKV(unittest.TestCase):
         end = time.time()
         print(end - start)
 
-
-
         assert output.shape == (512, 32, 768)
 
 
@@ -69,8 +67,8 @@ class TestRWKV(unittest.TestCase):
 
         start = time.time()
         gk, gv, gw, gu = rwkv_backward(k, v, w_w, w_u, gy)
-        # print(gw, gu)
-        # print(gk, gv)
+        print(gw.shape, gu.shape)
+        print(gk.shape, gv.shape)
         end = time.time()
         print(end - start)
         # print(output)
