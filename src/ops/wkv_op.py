@@ -28,9 +28,5 @@ wkv_backward_op = ops.Custom(
     func_type='aot'
 )
 
-if device_target == 'GPU':
-    wkv_forward_op.add_prim_attr('primitive_target', 'GPU')
-    wkv_backward_op.add_prim_attr('primitive_target', 'GPU')
-elif device_target == 'Ascend':
-    wkv_forward_op.add_prim_attr('primitive_target', 'Ascend')
-    wkv_backward_op.add_prim_attr('primitive_target', 'Ascend')
+wkv_forward_op.add_prim_attr('primitive_target', device_target)
+wkv_backward_op.add_prim_attr('primitive_target', device_target)
