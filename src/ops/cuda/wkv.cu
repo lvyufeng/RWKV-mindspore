@@ -37,6 +37,51 @@ __global__ void kernel_forward(const int B, const int T, const int C,
     }
 }
 
+
+template <typename F>
+__global__ void kernel_forward_with_state(
+    const int B, const int T, const int C, const F *__restrict__ const _w, const F *__restrict__ const _u,
+    const F *__restrict__ const _k, const F *__restrict__ const _v, F *__restrict__ const _y, F *__restrict__ const _s
+) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int _b = idx / C;
+    const int _c = idx % C;
+    const int _offset_s = _b * C * 3 + _c * 3;
+    const int _offset = _b * T * C + _c;
+
+    F u = _u[_c];
+    F w = _w[_c];
+    const F *__restrict__ const k = _k + _offset;
+    const F *__restrict__ const v = _v + _offset;
+    F *__restrict__ const y = _y + _offset;
+    F *__restrict__ const s = _s + _offset_s;
+
+    // aa and bb are running sums divided by exp(pp) (to avoid overflow)
+    F aa = s[0], bb = s[1], pp = s[2];
+    for (int i = 0; i < T; i++) {
+        const int ii = i * C;
+        const F kk = k[ii];
+        const F vv = v[ii];
+
+        F ww = u + kk;
+        F p = max(pp, ww);
+        F e1 = exp(pp - p);
+        F e2 = exp(ww - p);
+        y[ii] = (e1 * aa + e2 * vv) / (e1 * bb + e2);
+        
+        ww = w + pp;
+        p = max(ww, kk);
+        e1 = exp(ww - p);
+        e2 = exp(kk - p);
+        aa = e1 * aa + e2 * vv;
+        bb = e1 * bb + e2;
+        pp = p;
+    }
+    s[0] = aa;
+    s[1] = bb;
+    s[2] = pp;
+}
+
 template <typename F>
 __global__ void kernel_backward(const int B, const int T, const int C,
                                 const F *__restrict__ const _w, const F *__restrict__ const _u, const F *__restrict__ const _k, const F *__restrict__ const _v, const F *__restrict__ const _gy,
@@ -130,6 +175,28 @@ int wkv_forward(int nparam, void **params, int *ndims, int64_t **shapes, const c
     assert(B * C % threadsPerBlock.x == 0);
     dim3 numBlocks(B * C / threadsPerBlock.x);
     kernel_forward<<<numBlocks, threadsPerBlock, 0, custream>>>(B, T, C, w, u, k, v, y);
+    return 0;
+}
+
+int wkv_forward_with_state(int nparam, void **params, int *ndims, int64_t **shapes, const char **dtypes, void *stream,
+                           void *extra) {
+    cudaStream_t custream = static_cast<cudaStream_t>(stream);
+    if (nparam != 6) return 1;
+    float *w = static_cast<float *>(params[0]);
+    float *u = static_cast<float *>(params[1]);
+    float *k = static_cast<float *>(params[2]);
+    float *v = static_cast<float *>(params[3]);
+    float *s = static_cast<float *>(params[4]);
+    float *y = static_cast<float *>(params[5]);
+
+    int B = static_cast<int>(shapes[2][0]);
+    int T = static_cast<int>(shapes[2][1]);
+    int C = static_cast<int>(shapes[2][2]);
+
+    dim3 threadsPerBlock( min(C, 32) ); // requires --maxrregcount 60 for optimal performance
+    assert(B * C % threadsPerBlock.x == 0);
+    dim3 numBlocks(B * C / threadsPerBlock.x);
+    kernel_forward_with_state<<<numBlocks, threadsPerBlock, 0, custream>>>(B, T, C, w, u, k, v, y, s);
     return 0;
 }
 

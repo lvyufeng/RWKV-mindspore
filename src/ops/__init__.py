@@ -1,1 +1,1 @@
-from .wkv_op import wkv_forward_op, wkv_backward_op
+from .wkv_op import load_wkv_cuda_kernel

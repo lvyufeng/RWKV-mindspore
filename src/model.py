@@ -3,7 +3,7 @@ import numpy as np
 import mindspore
 from mindspore import nn, ops
 from mindspore import Tensor, Parameter
-from .ops import wkv_forward_op, wkv_backward_op
+from .ops import load_wkv_cuda_kernel
 
 RWKV_HEAD_QK_DIM = 0
 
@@ -20,16 +20,21 @@ class L2Wrap(nn.Cell):
         return (dout, gy)
 
 class WKV(nn.Cell):
+    def __init__(self, config):
+        super().__init__()
+        self.wkv_forward = load_wkv_cuda_kernel('wkv_forward', config.ctx_len)
+        self.wkv_backward = load_wkv_cuda_kernel('wkv_backward', config.ctx_len)
+
     def construct(self, w, u, k, v):
         w = -ops.exp(w)
-        y = wkv_forward_op(w, u, k, v)
+        y = self.wkv_forward(w, u, k, v)
 
         return y
     
     def bprop(self, w, u, k, v, y, gy):
-        gw, gu, gk, gv = wkv_backward_op(w, u, k, v, gy)
-        gw = ops.sum(gw, 1)
-        gu = ops.sum(gu, 1)
+        gw, gu, gk, gv = self.wkv_backward(w, u, k, v, gy)
+        gw = ops.sum(gw, 0)
+        gu = ops.sum(gu, 0)
 
         return (gw, gu, gk, gv)
 
@@ -70,7 +75,7 @@ class RWKV_TimeMix(nn.Cell):
 
         self.output = nn.Dense(attn_sz, config.n_embd, has_bias=False)
 
-        self.wkv = WKV()
+        self.wkv = WKV(config)
         self.key.scale_init = 0
         self.receptance.scale_init = 0
         self.output.scale_init = 0
@@ -142,11 +147,11 @@ class Block(nn.Cell):
         super().__init__()
         self.layer_id = layer_id
 
-        self.ln1 = nn.LayerNorm([config.n_embd])
-        self.ln2 = nn.LayerNorm([config.n_embd])
+        self.ln1 = nn.LayerNorm([config.n_embd], epsilon=1e-5)
+        self.ln2 = nn.LayerNorm([config.n_embd], epsilon=1e-5)
 
         if self.layer_id == 0:
-            self.ln0 = nn.LayerNorm([config.n_embd])
+            self.ln0 = nn.LayerNorm([config.n_embd], epsilon=1e-5)
 
         if self.layer_id == 0 and config.model_type == 'RWKV-ffnPre':
             self.ffnPre = RWKV_ChannelMix(config, 0)
@@ -158,7 +163,7 @@ class Block(nn.Cell):
 
     def construct(self, x):
         if self.layer_id == 0:
-            x = self.ln0(x)        
+            x = self.ln0(x)
         if self.layer_id == 0 and self.model_type == 'RWKV-ffnPre':
             x = x + self.ffnPre(self.ln1(x))  # better in some cases
         else:
@@ -173,7 +178,7 @@ class GPT(nn.Cell):
 
         self.emb = nn.Embedding(config.vocab_size, config.n_embd)
         self.blocks = nn.SequentialCell(*[Block(config, i) for i in range(config.n_layer)])
-        self.ln_out = nn.LayerNorm([config.n_embd])
+        self.ln_out = nn.LayerNorm([config.n_embd], epsilon=1e-5)
         self.head = nn.Dense(config.n_embd, config.vocab_size, has_bias=False)
 
         self.l2_wrapper = L2Wrap()
